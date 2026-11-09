@@ -48,6 +48,10 @@ model User {
   memberships UnitMembership[]
   invites     ViewerInvite[]   @relation("InviteCreator")
   auditEvents AuditEvent[]
+  mfaSecret   String?          // Base32 secret for TOTP
+  mfaEnabled  Boolean          @default(false)
+  mfaRecoveryCodes String?     // Códigos de recuperação em JSON/hash
+  operatorSessions OperatorSession[]
 }
 
 model UnitMembership {
@@ -125,3 +129,18 @@ model AuditEvent {
   @@index([occurredAt])
   @@index([unitId, occurredAt])
 }
+
+model OperatorSession {
+  id           String    @id @default(uuid())
+  userId       String
+  sessionHash  String    @unique
+  ipAddress    String?
+  userAgent    String?
+  createdAt    DateTime  @default(now())
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+}
+

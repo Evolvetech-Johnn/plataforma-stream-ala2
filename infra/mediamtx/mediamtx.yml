@@ -5,7 +5,8 @@ rtmp: false
 webrtc: false
 moq: false
 playback: false
-api: false
+api: true
+apiAddress: :9997
 metrics: false
 pprof: false
 
