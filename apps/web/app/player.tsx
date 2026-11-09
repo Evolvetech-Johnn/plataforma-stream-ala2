@@ -2,97 +2,242 @@
 import { useEffect, useRef, useState } from 'react';
 import Hls from 'hls.js';
 
-type Current = { id?: string; title?: string; status: string; scheduledAt?: string };
+type CurrentBroadcast = {
+  id?: string;
+  title?: string;
+  status: string;
+  scheduledAt?: string;
+};
+
 export default function Player() {
   const [token, setToken] = useState('');
   const [authorized, setAuthorized] = useState(false);
-  const [status, setStatus] = useState('NONE');
-  const [message, setMessage] = useState('Informe o convite privado.');
+  const [broadcast, setBroadcast] = useState<CurrentBroadcast>({ status: 'NONE' });
+  const [message, setMessage] = useState('Insira o código de convite privado para acessar.');
+  const [loading, setLoading] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
   const [playing, setPlaying] = useState(false);
 
-  useEffect(() => {
-    let active = true;
-    async function refresh() {
-      try {
-        const res = await fetch('/api/v1/broadcasts/current', { cache: 'no-store' });
-        if (!res.ok) return;
-        const data = await res.json() as Current;
-        if (active) setStatus(data.status);
-      } catch { /* status anterior e mensagem de rede no player */ }
+  async function checkSession() {
+    try {
+      const res = await fetch('/api/v1/viewer/session', { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.authorized) {
+          setAuthorized(true);
+          setMessage('Sessão ativa e autorizada.');
+        } else {
+          setAuthorized(false);
+        }
+      }
+    } catch {
+      // offline / sem rede
     }
-    void refresh();
-    void fetch('/api/v1/viewer/session', { cache: 'no-store' })
-      .then(res => res.ok ? res.json() : { authorized: false })
-      .then(data => { if (active && data.authorized) { setAuthorized(true); setMessage('Acesso reconhecido.'); } })
-      .catch(() => {});
-    const id = setInterval(() => void refresh(), 15_000);
-    return () => { active = false; clearInterval(id); };
-  }, []);
+  }
+
+  async function refreshBroadcast() {
+    try {
+      const res = await fetch('/api/v1/broadcasts/current', { cache: 'no-store' });
+      if (!res.ok) return;
+      const data = (await res.json()) as CurrentBroadcast;
+      setBroadcast(data);
+    } catch {
+      // mantém status anterior
+    }
+  }
 
   useEffect(() => {
-    if (status !== 'LIVE' && videoRef.current) {
-      videoRef.current.pause();
-      hlsRef.current?.destroy();
-      hlsRef.current = null;
-      videoRef.current.removeAttribute('src');
-      videoRef.current.load();
+    let active = true;
+    void refreshBroadcast();
+    void checkSession();
+
+    const interval = setInterval(() => {
+      if (active) void refreshBroadcast();
+    }, 10_000);
+
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, []);
+
+  // Interrompe imediatamente e limpa o buffer do vídeo quando não estiver LIVE
+  useEffect(() => {
+    if (broadcast.status !== 'LIVE') {
+      if (videoRef.current) {
+        videoRef.current.pause();
+        videoRef.current.removeAttribute('src');
+        videoRef.current.load();
+      }
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
+      }
       setPlaying(false);
     }
-  }, [status]);
+  }, [broadcast.status]);
 
   async function redeem(e: React.FormEvent) {
     e.preventDefault();
+    setLoading(true);
     setMessage('Validando convite...');
     try {
       const response = await fetch('/api/v1/viewer/redeem', {
-        method: 'POST', credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token }),
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: token.trim() }),
       });
-      if (!response.ok) throw new Error('Convite inválido, expirado ou indisponível.');
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.message || 'Convite inválido, esgotado ou expirado.');
+      }
+
       setAuthorized(true);
       setToken('');
-      setMessage('Convite validado. Aguarde o início da transmissão.');
+      setMessage('Convite aceito com sucesso. Transmissão vinculada à sua sessão.');
+      void refreshBroadcast();
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : 'Falha ao validar convite.');
+      setMessage(err instanceof Error ? err.message : 'Falha na validação do convite.');
+    } finally {
+      setLoading(false);
     }
+  }
+
+  async function logout() {
+    try {
+      await fetch('/api/v1/viewer/logout', { method: 'POST' });
+    } catch {
+      // ignora
+    }
+    setAuthorized(false);
+    setPlaying(false);
+    if (hlsRef.current) {
+      hlsRef.current.destroy();
+      hlsRef.current = null;
+    }
+    setMessage('Sessão encerrada com sucesso.');
   }
 
   function startPlayback() {
     const video = videoRef.current;
-    if (!video || status !== 'LIVE') return;
+    if (!video || broadcast.status !== 'LIVE') return;
     const src = '/hls/ala01/index.m3u8';
-    hlsRef.current?.destroy();
-    hlsRef.current = null;
+
+    if (hlsRef.current) {
+      hlsRef.current.destroy();
+      hlsRef.current = null;
+    }
+
     if (video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = src;
     } else if (Hls.isSupported()) {
-      const hls = new Hls({ enableWorker: true });
+      const hls = new Hls({
+        enableWorker: true,
+        lowLatencyMode: false,
+      });
       hlsRef.current = hls;
       hls.loadSource(src);
       hls.attachMedia(video);
     } else {
-      setMessage('Este navegador não suporta HLS.');
+      setMessage('Seu navegador não possui suporte à reprodução HLS.');
       return;
     }
-    void video.play().then(() => {
-      setPlaying(true);
-      setMessage('Reproduzindo transmissão ao vivo.');
-    }).catch(() => setMessage('Toque em reproduzir no player para iniciar.'));
-    // O efeito de status interrompe e limpa o stream quando não estiver LIVE.
+
+    video
+      .play()
+      .then(() => {
+        setPlaying(true);
+        setMessage('Reproduzindo áudio e vídeo ao vivo.');
+      })
+      .catch(() => {
+        setMessage('Pressione o botão Play no player de vídeo para iniciar com som.');
+      });
   }
 
-  return <section className="card">
-    <div className="status"><span className="dot" />Estado: <strong>{status === 'LIVE' ? 'AO VIVO' : status === 'PAUSED' ? 'INTERROMPIDA' : status === 'NONE' ? 'NÃO AGENDADA' : 'AGUARDANDO'}</strong></div>
-    {!authorized && <form onSubmit={redeem}>
-      <label htmlFor="token">Código de convite</label>
-      <input id="token" value={token} onChange={e => setToken(e.target.value)} autoComplete="off" placeholder="Cole o código recebido" required />
-      <button type="submit">Validar convite</button>
-    </form>}
-    <video ref={videoRef} controls playsInline preload="none" />
-    {authorized && status === 'LIVE' && !playing && <button type="button" onClick={startPlayback}>Assistir à transmissão</button>}
-    <p role="status">{message}</p>
-    <p className="help">Durante a administração do sacramento, a transmissão deve permanecer desligada.</p>
-  </section>;
+  const getStatusBadge = () => {
+    switch (broadcast.status) {
+      case 'LIVE':
+        return <span className="status-badge status-live"><span className="dot" /> AO VIVO</span>;
+      case 'PAUSED':
+        return <span className="status-badge status-paused"><span className="dot" /> TRANSMISSÃO INTERROMPIDA (SACRAMENTO)</span>;
+      case 'SCHEDULED':
+      case 'READY':
+        return <span className="status-badge status-scheduled"><span className="dot" /> AGENDADA</span>;
+      case 'ENDED':
+        return <span className="status-badge status-ended"><span className="dot" /> TRANSMISSÃO ENCERRADA</span>;
+      default:
+        return <span className="status-badge status-ended"><span className="dot" /> NENHUMA TRANSMISSÃO ATIVA</span>;
+    }
+  };
+
+  return (
+    <section className="card" aria-label="Portal de visualização privada">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+        <div>{getStatusBadge()}</div>
+        {authorized && (
+          <button type="button" onClick={logout} className="btn btn-secondary" style={{ padding: '6px 12px', fontSize: 13 }}>
+            Sair do Acesso
+          </button>
+        )}
+      </div>
+
+      {broadcast.title && (
+        <h2 style={{ fontSize: 20, margin: '0 0 16px 0', color: '#1e293b' }}>
+          {broadcast.title}
+        </h2>
+      )}
+
+      {!authorized && (
+        <form onSubmit={redeem} style={{ margin: '18px 0' }}>
+          <label htmlFor="token">Código de Convite Privado</label>
+          <input
+            id="token"
+            value={token}
+            onChange={(e) => setToken(e.target.value)}
+            autoComplete="off"
+            placeholder="Cole aqui o código fornecido pelo líder"
+            required
+            disabled={loading}
+          />
+          <button type="submit" className="btn btn-primary" style={{ width: '100%' }} disabled={loading}>
+            {loading ? 'Validando...' : 'Acessar Transmissão'}
+          </button>
+        </form>
+      )}
+
+      <video
+        ref={videoRef}
+        controls
+        playsInline
+        preload="none"
+        aria-label="Transmissão ao vivo da reunião"
+      />
+
+      {authorized && broadcast.status === 'LIVE' && !playing && (
+        <div style={{ textAlign: 'center', margin: '14px 0' }}>
+          <button type="button" onClick={startPlayback} className="btn btn-success" style={{ fontSize: 17, padding: '14px 28px' }}>
+            ▶ Iniciar Reprodução
+          </button>
+        </div>
+      )}
+
+      {broadcast.status === 'PAUSED' && (
+        <div className="alert alert-warning" role="alert">
+          <strong>Atenção:</strong> A transmissão está temporariamente desligada em reverência à administração do sacramento. A transmissão retornará automaticamente quando a ordenança for concluída.
+        </div>
+      )}
+
+      <div className="alert alert-info" role="status">
+        {message}
+      </div>
+
+      <p className="help" style={{ marginTop: 24, fontSize: 13, borderTop: '1px solid #e2e8f0', paddingTop: 14 }}>
+        🔒 Transmissão privada e confidencial, autorizada estritamente para membros da ala impossibilitados de comparecer presencialmente.
+        Não é permitido gravar, retransmitir ou compartilhar convites.
+      </p>
+    </section>
+  );
 }

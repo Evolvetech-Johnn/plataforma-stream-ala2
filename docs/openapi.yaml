@@ -1,11 +1,10 @@
 openapi: 3.1.0
 info:
   title: Transmissão Local - API
-  version: 0.1.0
+  version: 0.2.0
   description: >
-    Contrato alvo do projeto. Somente /healthz, /v1/broadcasts/current,
-    /v1/viewer/redeem, /v1/viewer/session e /internal/hls-authorize estão implementados no scaffold.
-    Todos os endpoints /v1/operator/* são planejados e NÃO implementados.
+    Contrato da plataforma privada de transmissão da ala.
+    Todos os endpoints abaixo estão implementados e testados no backend NestJS.
 servers:
   - url: https://transmissao.exemplo.org/api
 paths:
@@ -14,19 +13,22 @@ paths:
       summary: Liveness/readiness de API+BD (implementado)
       responses:
         '200': { description: API e BD saudáveis }
+
   /v1/broadcasts/current:
     get:
       summary: Estado público da transmissão atual (implementado)
       responses:
         '200': { description: Estado de transmissão sem dados pessoais }
+
   /v1/viewer/session:
     get:
       summary: Verifica sessão de convite pelo cookie HttpOnly (implementado)
       responses:
         '200': { description: authorized true ou false }
+
   /v1/viewer/redeem:
     post:
-      summary: Resgata convite privado e define cookie HttpOnly (implementado - POC)
+      summary: Resgata convite privado e define cookie HttpOnly com retry P2034 e rate limit (implementado)
       requestBody:
         required: true
         content:
@@ -37,52 +39,163 @@ paths:
               properties:
                 token: { type: string, minLength: 32, maxLength: 128 }
       responses:
-        '201': { description: Cookie tv_session definido; acesso depende de LIVE }
+        '201': { description: Cookie tv_session definido }
         '400': { description: Convite malformado }
         '403': { description: Convite expirado ou inválido }
+        '429': { description: Limite de requisições excedido }
+
+  /v1/viewer/logout:
+    post:
+      summary: Encerra e revoga a sessão do espectador (implementado)
+      responses:
+        '200': { description: Sessão encerrada e cookie limpo }
+
   /internal/hls-authorize:
     get:
-      summary: Autorização por requisição HLS (implementado - uso interno pelo Caddy)
+      summary: Autorização por requisição HLS fail-closed (implementado - uso interno pelo Caddy)
       responses:
         '204': { description: Acesso permitido }
-        '403': { description: Acesso negado }
+        '403': { description: Acesso negado (fail-closed) }
+
   /v1/operator/login:
     post:
-      summary: Login operador com MFA (PLANEJADO)
+      summary: Login operador com Argon2id e MFA opcional (implementado)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string }
       responses:
-        '200': { description: Operador autenticado }
-  /v1/operator/broadcasts:
+        '200': { description: Sessão criada via cookie op_session ou mfaRequired true }
+        '401': { description: Credenciais inválidas }
+
+  /v1/operator/mfa/verify:
     post:
-      summary: Criação de transmissão (PLANEJADO)
+      summary: Verificação de código TOTP do operador (implementado)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, code]
+              properties:
+                email: { type: string }
+                code: { type: string }
       responses:
-        '201': { description: Criada }
+        '200': { description: Código validado e sessão op_session gerada }
+        '401': { description: Código inválido }
+
+  /v1/operator/logout:
+    post:
+      summary: Logout do operador e revogação da sessão (implementado)
+      responses:
+        '200': { description: Sessão revogada e cookie op_session limpo }
+
+  /v1/operator/me:
+    get:
+      summary: Retorna dados do operador autenticado (implementado)
+      responses:
+        '200': { description: Dados do usuário e perfis de unidade }
+        '401': { description: Não autenticado }
+
+  /v1/operator/broadcasts:
+    get:
+      summary: Lista transmissões da unidade do operador (implementado)
+      responses:
+        '200': { description: Lista de transmissões }
+    post:
+      summary: Criação de transmissão (implementado)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, scheduledAt]
+              properties:
+                title: { type: string }
+                scheduledAt: { type: string, format: date-time }
+                streamPath: { type: string }
+      responses:
+        '201': { description: Transmissão agendada }
+
+  /v1/operator/broadcasts/{id}:
+    get:
+      summary: Detalhes da transmissão e estatísticas (implementado)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: Detalhes da transmissão }
+
   /v1/operator/broadcasts/{id}/start:
     post:
-      summary: Abre janela de autorização de espectadores (PLANEJADO)
-      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
-      responses:
-        '200': { description: Estado LIVE; requer origem ativa }
-  /v1/operator/broadcasts/{id}/pause:
-    post:
-      summary: Bloqueia novos segmentos HLS (PLANEJADO)
-      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
-      responses:
-        '200': { description: Estado PAUSED }
-  /v1/operator/broadcasts/{id}/resume:
-    post:
-      summary: Reabre transmissão após confirmação do operador (PLANEJADO)
-      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      summary: Inicia a transmissão mudando estado para LIVE (implementado)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
       responses:
         '200': { description: Estado LIVE }
+        '409': { description: Conflito com outra transmissão ativa }
+
+  /v1/operator/broadcasts/{id}/pause:
+    post:
+      summary: Pausa a transmissão mudando para PAUSED antes do sacramento (implementado)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: Estado PAUSED }
+
+  /v1/operator/broadcasts/{id}/resume:
+    post:
+      summary: Retoma a transmissão para LIVE após a ordenança (implementado)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: Estado LIVE }
+
   /v1/operator/broadcasts/{id}/end:
     post:
-      summary: Encerra irreversivelmente a transmissão atual (PLANEJADO)
-      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      summary: Encerra definitivamente a transmissão e revoga sessões de visualização (implementado)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
       responses:
         '200': { description: Estado ENDED }
+
   /v1/operator/broadcasts/{id}/invites:
-    post:
-      summary: Emite convite expiráveis para uma reunião (PLANEJADO)
-      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+    get:
+      summary: Lista convites da transmissão sem expor tokens/hashes (implementado)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
       responses:
-        '201': { description: Token apresentado apenas uma vez }
+        '200': { description: Lista de convites }
+    post:
+      summary: Emite novo convite de uso restrito (implementado)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                maxUses: { type: integer, default: 2 }
+                expiresInHours: { type: integer, default: 4 }
+      responses:
+        '201': { description: Token retornado apenas nesta resposta }
+
+  /v1/operator/invites/{id}:
+    delete:
+      summary: Revoga convite e todas as sessões ativas vinculadas (implementado)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: Convite e sessões revogadas }
+
+  /v1/operator/stream-health:
+    get:
+      summary: Consulta saúde do SRT e HLS via API interna do MediaMTX (implementado)
+      responses:
+        '200': { description: Status do encoder SRT e HLS }
+
+  /v1/operator/audit:
+    get:
+      summary: Trilha de auditoria das ações administrativas da unidade (implementado)
+      responses:
+        '200': { description: Lista de eventos de auditoria }
