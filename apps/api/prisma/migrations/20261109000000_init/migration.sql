@@ -190,3 +190,4 @@ ALTER TABLE "AuditEvent" ADD CONSTRAINT "AuditEvent_unitId_fkey" FOREIGN KEY ("u
 
 -- AddForeignKey
 ALTER TABLE "AuditEvent" ADD CONSTRAINT "AuditEvent_broadcastId_fkey" FOREIGN KEY ("broadcastId") REFERENCES "Broadcast"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+

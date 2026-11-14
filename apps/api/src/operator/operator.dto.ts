@@ -47,3 +47,4 @@ export class CreateInviteDto {
   @Max(24)
   expiresInHours?: number;
 }
+

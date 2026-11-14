@@ -33,3 +33,4 @@ else
     echo "Uso: $0 {backup|restore <arquivo>}"
     exit 1
 fi
+

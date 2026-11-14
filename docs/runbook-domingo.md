@@ -51,3 +51,4 @@ Guia de 1 página para os 2 operadores designados para a transmissão dominical.
 - **Queda de Internet na Capela:** O OBS tentará reconectar automaticamente. Aguarde 30 segundos. Se não voltar, atualize o painel.
 - **Vazamento do Link:** Clique em **"Revogar"** ao lado do convite comprometido no painel para desconectar imediatamente o espectador.
 - **Interrupção de Emergência:** Feche o OBS e execute no terminal do VPS: `docker compose stop mediamtx`.
+

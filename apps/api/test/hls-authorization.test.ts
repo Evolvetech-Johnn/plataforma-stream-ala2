@@ -244,3 +244,4 @@ describe('Testes Mandatórios 3, 4 e 5: Proteção e Autorização HLS (Fail-Clo
     assert.equal(res2.getStatusCode(), 204);
   });
 });
+

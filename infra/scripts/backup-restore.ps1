@@ -1,4 +1,4 @@
-﻿param (
+param (
     [string]$Action = "backup",
     [string]$FilePath = ""
 )
@@ -28,3 +28,4 @@ elseif ($Action -eq "restore") {
 else {
     Write-Host "Uso: .\backup-restore.ps1 -Action backup|restore -FilePath <caminho>"
 }
+

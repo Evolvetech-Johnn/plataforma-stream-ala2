@@ -43,3 +43,4 @@ Em caso de anomalia durante a reunião:
    ```bash
    docker compose stop mediamtx
    ```
+
