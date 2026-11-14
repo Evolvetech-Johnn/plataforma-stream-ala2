@@ -46,3 +46,4 @@ jobs:
 
       - name: Validar Sintaxe e Redes do Docker Compose
         run: docker compose --env-file .env.example config
+
