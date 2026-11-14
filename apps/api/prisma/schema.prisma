@@ -1,0 +1,127 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UnitType {
+  WARD
+  STAKE
+}
+
+enum UnitRole {
+  ADMIN
+  OPERATOR
+  READ_ONLY
+}
+
+enum BroadcastStatus {
+  SCHEDULED
+  READY
+  LIVE
+  PAUSED
+  ENDED
+  FAILED
+}
+
+model Unit {
+  id          String           @id @default(uuid())
+  slug        String           @unique
+  name        String
+  type        UnitType         @default(WARD)
+  createdAt   DateTime         @default(now())
+  memberships UnitMembership[]
+  broadcasts  Broadcast[]
+  auditEvents AuditEvent[]
+}
+
+model User {
+  id          String           @id @default(uuid())
+  email       String           @unique
+  displayName String
+  passwordHash String?         // Preencher apenas com Argon2id e MFA no módulo de operador
+  enabled     Boolean          @default(true)
+  createdAt   DateTime         @default(now())
+  memberships UnitMembership[]
+  invites     ViewerInvite[]   @relation("InviteCreator")
+  auditEvents AuditEvent[]
+}
+
+model UnitMembership {
+  id        String   @id @default(uuid())
+  userId    String
+  unitId    String
+  role      UnitRole
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  unit      Unit     @relation(fields: [unitId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, unitId, role])
+  @@index([unitId, role])
+}
+
+model Broadcast {
+  id          String          @id @default(uuid())
+  slug        String          @unique
+  unitId      String
+  title       String
+  streamPath  String          @default("ala01")
+  status      BroadcastStatus @default(SCHEDULED)
+  scheduledAt DateTime
+  startedAt   DateTime?
+  endedAt     DateTime?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  unit        Unit            @relation(fields: [unitId], references: [id])
+  invites     ViewerInvite[]
+  auditEvents AuditEvent[]
+
+  @@index([unitId, status, scheduledAt])
+}
+
+model ViewerInvite {
+  id           String          @id @default(uuid())
+  broadcastId  String
+  tokenHash    String          @unique // Nunca armazenar token legível
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  maxUses      Int             @default(2)
+  uses         Int             @default(0)
+  createdAt    DateTime        @default(now())
+  createdById  String?
+  broadcast    Broadcast       @relation(fields: [broadcastId], references: [id], onDelete: Cascade)
+  createdBy    User?           @relation("InviteCreator", fields: [createdById], references: [id])
+  sessions     ViewerSession[]
+
+  @@index([broadcastId, expiresAt])
+}
+
+model ViewerSession {
+  id           String       @id @default(uuid())
+  inviteId     String
+  sessionHash  String       @unique
+  createdAt    DateTime     @default(now())
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  invite       ViewerInvite @relation(fields: [inviteId], references: [id], onDelete: Cascade)
+
+  @@index([inviteId, expiresAt])
+}
+
+model AuditEvent {
+  id          String     @id @default(uuid())
+  occurredAt  DateTime   @default(now())
+  action      String
+  actorId     String?
+  unitId      String?
+  broadcastId String?
+  details     Json?
+  actor       User?      @relation(fields: [actorId], references: [id])
+  unit        Unit?      @relation(fields: [unitId], references: [id])
+  broadcast   Broadcast? @relation(fields: [broadcastId], references: [id])
+
+  @@index([occurredAt])
+  @@index([unitId, occurredAt])
+}

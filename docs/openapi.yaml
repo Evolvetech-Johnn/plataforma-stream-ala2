@@ -1,0 +1,88 @@
+openapi: 3.1.0
+info:
+  title: Transmissão Local - API
+  version: 0.1.0
+  description: >
+    Contrato alvo do projeto. Somente /healthz, /v1/broadcasts/current,
+    /v1/viewer/redeem, /v1/viewer/session e /internal/hls-authorize estão implementados no scaffold.
+    Todos os endpoints /v1/operator/* são planejados e NÃO implementados.
+servers:
+  - url: https://transmissao.exemplo.org/api
+paths:
+  /healthz:
+    get:
+      summary: Liveness/readiness de API+BD (implementado)
+      responses:
+        '200': { description: API e BD saudáveis }
+  /v1/broadcasts/current:
+    get:
+      summary: Estado público da transmissão atual (implementado)
+      responses:
+        '200': { description: Estado de transmissão sem dados pessoais }
+  /v1/viewer/session:
+    get:
+      summary: Verifica sessão de convite pelo cookie HttpOnly (implementado)
+      responses:
+        '200': { description: authorized true ou false }
+  /v1/viewer/redeem:
+    post:
+      summary: Resgata convite privado e define cookie HttpOnly (implementado - POC)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token: { type: string, minLength: 32, maxLength: 128 }
+      responses:
+        '201': { description: Cookie tv_session definido; acesso depende de LIVE }
+        '400': { description: Convite malformado }
+        '403': { description: Convite expirado ou inválido }
+  /internal/hls-authorize:
+    get:
+      summary: Autorização por requisição HLS (implementado - uso interno pelo Caddy)
+      responses:
+        '204': { description: Acesso permitido }
+        '403': { description: Acesso negado }
+  /v1/operator/login:
+    post:
+      summary: Login operador com MFA (PLANEJADO)
+      responses:
+        '200': { description: Operador autenticado }
+  /v1/operator/broadcasts:
+    post:
+      summary: Criação de transmissão (PLANEJADO)
+      responses:
+        '201': { description: Criada }
+  /v1/operator/broadcasts/{id}/start:
+    post:
+      summary: Abre janela de autorização de espectadores (PLANEJADO)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses:
+        '200': { description: Estado LIVE; requer origem ativa }
+  /v1/operator/broadcasts/{id}/pause:
+    post:
+      summary: Bloqueia novos segmentos HLS (PLANEJADO)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses:
+        '200': { description: Estado PAUSED }
+  /v1/operator/broadcasts/{id}/resume:
+    post:
+      summary: Reabre transmissão após confirmação do operador (PLANEJADO)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses:
+        '200': { description: Estado LIVE }
+  /v1/operator/broadcasts/{id}/end:
+    post:
+      summary: Encerra irreversivelmente a transmissão atual (PLANEJADO)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses:
+        '200': { description: Estado ENDED }
+  /v1/operator/broadcasts/{id}/invites:
+    post:
+      summary: Emite convite expiráveis para uma reunião (PLANEJADO)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses:
+        '201': { description: Token apresentado apenas uma vez }

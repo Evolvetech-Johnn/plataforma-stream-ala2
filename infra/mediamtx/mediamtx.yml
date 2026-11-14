@@ -1,0 +1,42 @@
+# Base para MediaMTX 1.21.3, apenas um caminho/uma ala.
+logLevel: info
+rtsp: false
+rtmp: false
+webrtc: false
+moq: false
+playback: false
+api: false
+metrics: false
+pprof: false
+
+srt: true
+srtAddress: :8890
+hls: true
+hlsAddress: :8888
+hlsVariant: mpegts
+hlsSegmentDuration: 2s
+hlsSegmentCount: 4
+hlsAlwaysRemux: true
+hlsAllowOrigins: []
+
+# A porta SRT é pública. Exigimos criptografia SRT por caminho.
+# O HLS está acessível SOMENTE dentro da rede Docker e protegido no Caddy.
+authMethod: internal
+authInternalUsers:
+  - user: any
+    pass:
+    ips: []
+    permissions:
+      - action: publish
+        path: ala01
+      - action: read
+        path: ala01
+
+paths:
+  ala01:
+    source: publisher
+    overridePublisher: false
+    record: false
+    # Setados em runtime pelas variáveis MTX_PATHS_ALA01_... no compose.
+    srtPublishPassphrase: ''
+    srtReadPassphrase: ''

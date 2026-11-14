@@ -1,0 +1,33 @@
+{
+    email {$ACME_EMAIL}
+}
+
+{$SITE_DOMAIN} {
+    encode zstd gzip
+
+    # Não disponibilizar endpoints internos pelo endereço público.
+    @internal path /api/internal /api/internal/*
+    handle @internal {
+        respond "Not found" 404
+    }
+
+    handle_path /api/* {
+        reverse_proxy api:3001
+    }
+
+    # Proteger playlists, init segments e segmentos; o navegador nunca
+    # acessa diretamente a porta 8888 do MediaMTX.
+    handle_path /hls/* {
+        forward_auth api:3001 {
+            uri /internal/hls-authorize
+        }
+        header Cache-Control "private, no-store"
+        reverse_proxy mediamtx:8888 {
+            header_down Location ^/ /hls/
+        }
+    }
+
+    handle {
+        reverse_proxy web:3000
+    }
+}
