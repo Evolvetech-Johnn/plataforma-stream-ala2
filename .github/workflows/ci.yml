@@ -1,0 +1,48 @@
+name: CI - Transmissão da Ala
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-and-build:
+    name: Testes e Compilação de Produção
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout do Repositório
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js 24 LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Instalar Dependências da API (NestJS + Prisma)
+        working-directory: ./apps/api
+        run: npm ci
+
+      - name: Gerar Prisma Client
+        working-directory: ./apps/api
+        run: npx prisma generate
+
+      - name: Executar Suíte de Testes Automatizados (21 Testes)
+        working-directory: ./apps/api
+        run: npm test
+
+      - name: Compilar API TypeScript (Build de Produção)
+        working-directory: ./apps/api
+        run: npm run build
+
+      - name: Instalar Dependências do Web (Next.js 15 + React 19)
+        working-directory: ./apps/web
+        run: npm ci
+
+      - name: Compilar Frontend Next.js (Build de Produção)
+        working-directory: ./apps/web
+        run: npm run build
+
+      - name: Validar Sintaxe e Redes do Docker Compose
+        run: docker compose --env-file .env.example config

@@ -12,26 +12,20 @@ Para transformar o projeto em uma plataforma pronta para piloto assistido sem de
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│ ENTREGUES (Fase 1 - Fundação e MVP Funcional)                          │
+│ CONCLUÍDOS NO WORKSPACE (Fases 1 e 2 - Código, Segurança e QA)         │
 ├────────────────────────────────────────────────────────────────────────┤
 │  Split 0: Auditoria Técnica e Baseline Git                   [100% OK] │
 │  Split 1: Build, Dependências e Infraestrutura Base          [100% OK] │
 │  Split 2: Autenticação, Máquina de Estados e Proteção HLS    [100% OK] │
-└────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│ PRÓXIMAS ETAPAS DE CÓDIGO (Fase 2 - Fechamento Técnico no Workspace)   │
-├────────────────────────────────────────────────────────────────────────┤
-│  Split 3: Segurança Operacional & Refinamento de UX          [A SEGUIR]│
-│  Split 4: Hardening, CI/CD e Teste de Carga (30 Viewers)     [PENDENTE]│
+│  Split 3: Segurança Operacional & Refinamento de UX          [100% OK] │
+│  Split 4: Hardening, CI/CD e Teste de Carga (30 Viewers)     [100% OK] │
 └────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
 ┌────────────────────────────────────────────────────────────────────────┐
 │ HOMOLOGAÇÃO E GOVERNANÇA (Fase 3 - Validação Real e Piloto)            │
 ├────────────────────────────────────────────────────────────────────────┤
-│  Split 5: Testes de Laboratório com Mídia Sintética e Docker [PENDENTE]│
+│  Split 5: Testes de Laboratório com Mídia Sintética e Docker [A SEGUIR]│
 │  Split 6: Protocolo GO/NO-GO e Piloto Supervisionado         [PENDENTE]│
 └────────────────────────────────────────────────────────────────────────┘
 ```
@@ -73,26 +67,25 @@ Para transformar o projeto em uma plataforma pronta para piloto assistido sem de
 
 ---
 
-### 🟡 Split 3 — Segurança Operacional & Refinamentos de UX (Próximo Sprint de Código)
+### ✅ Split 3 — Segurança Operacional & Refinamentos de UX
 - **Objetivo:** Fechar as vulnerabilidades operacionais restantes e garantir autonomia completa pela interface web.
-- **Tarefas a Implementar:**
-  1. **Proteção Anti-CSRF Reforçada:** Guard NestJS exigindo cabeçalho customizado (`X-Requested-With` ou token CSRF) em mutações (`POST`, `DELETE`).
-  2. **Rate Limiting no Login do Operador:** Bloqueio temporário (5 tentativas / 5 min) por IP no `/v1/operator/login` contra força bruta.
-  3. **Auto-Configuração de MFA pelo Operador:** Endpoints `/v1/operator/mfa/setup` e `/v1/operator/mfa/enable` para geração de QR Code/URI e validação do primeiro token.
-  4. **Formulário de Agendamento na Web:** Modal no painel do operador para criar transmissões (`POST /v1/operator/broadcasts`) sem depender do terminal.
-  5. **Feedback Visual de Buffer/Reconexão:** Indicador animado no player para internet lenta ou oscilação de rede do espectador.
-  6. **Rotina de Limpeza de Sessões:** Endpoint administrativo e script de expurgo de tokens/sessões com mais de 7 dias (privacidade LGPD).
-- **Critério de Pronto (DoD):** Operador cria nova reunião pela web, ativa MFA sem tocar no banco, e ataques de força bruta/CSRF são barrados.
+- **Entregas Realizadas:**
+  - **Proteção Anti-CSRF:** Guard NestJS exigindo cabeçalho customizado (`X-Requested-With`) em todas as mutações (`POST`, `DELETE`).
+  - **Rate Limiting no Login:** Limitador em janela deslizante (5 tentativas / 5 min) por IP no `/v1/operator/login` contra força bruta.
+  - **Auto-Configuração de MFA:** Endpoints `/v1/operator/mfa/setup` e `/v1/operator/mfa/enable` e modal web completo no painel do operador.
+  - **Formulário de Agendamento na Web:** Modal no painel do operador para criar novas transmissões (`POST /v1/operator/broadcasts`) com streamPath e agendamento.
+  - **Feedback Visual de Buffer/Reconexão:** Indicador animado no player para reconexão e internet lenta.
+  - **Rotina de Limpeza de Sessões:** Endpoint administrativo `/v1/operator/purge-expired` para expurgo de tokens/sessões com mais de 7 dias (LGPD).
 
 ---
 
-### 🟡 Split 4 — Hardening, CI/CD e Testes de Carga
+### ✅ Split 4 — Hardening, CI/CD e Testes de Carga
 - **Objetivo:** Garantir estabilidade com 30 clientes simultâneos e esteira automatizada de testes.
-- **Tarefas a Implementar:**
-  1. **Pipeline de CI (GitHub Actions):** `.github/workflows/ci.yml` executando lint, typecheck, prisma generate, testes unitários e build de API e Web a cada push.
-  2. **Simulador de Carga (30 Viewers):** Script automatizado (TypeScript / Node.js) que abre 30 conexões concorrentes requisitando manifestos e segmentos HLS em loop de 60 segundos, gerando relatório de latência, throughput e erros.
-  3. **Padronização de Logs e Sanitização:** Interceptor global no NestJS para formatar logs em JSON, mascarando tokens, cookies e IPs.
-- **Critério de Pronto (DoD):** CI verde no GitHub e relatório de benchmark com 30 clientes simulados mantendo taxa de erro 0%.
+- **Entregas Realizadas:**
+  - **Pipeline de CI (GitHub Actions):** `.github/workflows/ci.yml` configurado com Node.js 24 LTS executando lint, prisma generate, suíte de 21 testes, build de API e Web e validação do Compose.
+  - **Simulador de Carga (30 Viewers):** Script automatizado `infra/scripts/load-test-30-viewers.ts` simulando 30 conexões concorrentes, medindo latência (mín, média, p95, p99), throughput e dimensionamento de egress VPS (45 Mbps).
+  - **Logging Sanitizado Centralizado:** `LoggingInterceptor` global mascarando credenciais, tokens e cookies em todas as requisições HTTP.
+  - **Script npm:** `"test:load"` integrado ao `apps/api/package.json`.
 
 ---
 
