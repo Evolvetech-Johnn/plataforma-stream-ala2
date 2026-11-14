@@ -7,6 +7,7 @@ import { InternalController } from './internal.controller.js';
 import { OperatorController } from './operator/operator.controller.js';
 import { OperatorService } from './operator/operator.service.js';
 import { OperatorGuard } from './operator/operator.guard.js';
+import { CsrfGuard } from './common/csrf.guard.js';
 
 @Module({
   controllers: [
@@ -20,6 +21,7 @@ import { OperatorGuard } from './operator/operator.guard.js';
     PrismaService,
     OperatorService,
     OperatorGuard,
+    CsrfGuard,
   ],
 })
 export class AppModule {}

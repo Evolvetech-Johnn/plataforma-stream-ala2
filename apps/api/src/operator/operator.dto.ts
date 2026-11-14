@@ -1,4 +1,15 @@
-import { IsEmail, IsNotEmpty, IsOptional, IsString, MinLength, MaxLength, IsInt, Min, Max, IsDateString } from 'class-validator';
+import {
+  IsEmail,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  MinLength,
+  MaxLength,
+  IsInt,
+  Min,
+  Max,
+  IsDateString,
+} from 'class-validator';
 
 export class LoginDto {
   @IsEmail({}, { message: 'Email inválido' })
@@ -17,6 +28,22 @@ export class MfaVerifyDto {
   @IsString()
   @IsOptional()
   tempToken?: string;
+}
+
+export class MfaEnableDto {
+  @IsString()
+  @IsNotEmpty({ message: 'Código MFA obrigatório' })
+  code!: string;
+
+  @IsString()
+  @IsNotEmpty({ message: 'Chave secreta temporária obrigatória' })
+  secret!: string;
+}
+
+export class MfaDisableDto {
+  @IsString()
+  @IsNotEmpty({ message: 'Senha atual obrigatória para desativar MFA' })
+  password!: string;
 }
 
 export class CreateBroadcastDto {
@@ -47,4 +74,3 @@ export class CreateInviteDto {
   @Max(24)
   expiresInHours?: number;
 }
-

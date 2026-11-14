@@ -115,3 +115,4 @@ Para transformar o projeto em uma plataforma pronta para piloto assistido sem de
   3. **Ensaio Operacional com 2 Operadores:** Treinamento prático utilizando o [docs/runbook-domingo.md](docs/runbook-domingo.md) com ênfase na pausa pré-sacramento.
   4. **Emissão de Convites Nominais Restritos:** Distribuição de links de uso único apenas para membros com impossibilidade de comparecimento presencial.
 - **Critério de Pronto (DoD):** Primeira transmissão autorizada realizada sem transmissão do sacramento e com encerramento auditado.
+

@@ -532,5 +532,125 @@ export class OperatorService {
       },
     });
   }
+
+  async setupMfa(userId: string): Promise<{ secret: string; otpauthUrl: string }> {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new NotFoundException('Usuário não encontrado');
+
+    const secret = authenticator.generateSecret();
+    const otpauthUrl = authenticator.keyuri(user.email, 'TransmissaoAla', secret);
+
+    return { secret, otpauthUrl };
+  }
+
+  async enableMfa(userId: string, secret: string, code: string): Promise<{ success: true }> {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new NotFoundException('Usuário não encontrado');
+
+    const isValid = authenticator.verify({
+      token: code.trim(),
+      secret: secret.trim(),
+    });
+
+    if (!isValid) {
+      throw new BadRequestException('Código de verificação TOTP inválido. O MFA não foi ativado.');
+    }
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        mfaSecret: secret.trim(),
+        mfaEnabled: true,
+      },
+    });
+
+    await this.prisma.auditEvent.create({
+      data: {
+        action: 'OPERATOR_MFA_ENABLED',
+        actorId: userId,
+      },
+    });
+
+    return { success: true };
+  }
+
+  async disableMfa(userId: string, passwordPlain: string): Promise<{ success: true }> {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user || !user.passwordHash) throw new NotFoundException('Usuário não encontrado');
+
+    const passwordValid = await argon2.verify(user.passwordHash, passwordPlain);
+    if (!passwordValid) {
+      throw new UnauthorizedException('Senha incorreta para desativar o MFA');
+    }
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        mfaSecret: null,
+        mfaEnabled: false,
+      },
+    });
+
+    await this.prisma.auditEvent.create({
+      data: {
+        action: 'OPERATOR_MFA_DISABLED',
+        actorId: userId,
+      },
+    });
+
+    return { success: true };
+  }
+
+  async purgeExpiredData(actorId: string, daysToKeep = 7) {
+    const cutoffDate = new Date(Date.now() - daysToKeep * 24 * 60 * 60 * 1000);
+
+    return this.prisma.$transaction(async (tx) => {
+      const deletedViewerSessions = await tx.viewerSession.deleteMany({
+        where: {
+          OR: [
+            { expiresAt: { lt: cutoffDate } },
+            { revokedAt: { lt: cutoffDate } },
+          ],
+        },
+      });
+
+      const deletedInvites = await tx.viewerInvite.deleteMany({
+        where: {
+          OR: [
+            { expiresAt: { lt: cutoffDate } },
+            { revokedAt: { lt: cutoffDate } },
+          ],
+        },
+      });
+
+      const deletedOperatorSessions = await tx.operatorSession.deleteMany({
+        where: {
+          OR: [
+            { expiresAt: { lt: cutoffDate } },
+            { revokedAt: { lt: cutoffDate } },
+          ],
+        },
+      });
+
+      await tx.auditEvent.create({
+        data: {
+          action: 'DATA_PURGED_LGPD',
+          actorId,
+          details: {
+            cutoffDate,
+            deletedViewerSessions: deletedViewerSessions.count,
+            deletedInvites: deletedInvites.count,
+            deletedOperatorSessions: deletedOperatorSessions.count,
+          },
+        },
+      });
+
+      return {
+        deletedViewerSessions: deletedViewerSessions.count,
+        deletedInvites: deletedInvites.count,
+        deletedOperatorSessions: deletedOperatorSessions.count,
+      };
+    });
+  }
 }
 

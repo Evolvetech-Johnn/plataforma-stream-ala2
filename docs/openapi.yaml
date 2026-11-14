@@ -194,6 +194,52 @@ paths:
       responses:
         '200': { description: Status do encoder SRT e HLS }
 
+  /v1/operator/mfa/setup:
+    post:
+      summary: Inicializa configuração do MFA gerando chave Base32 e otpauth URI (implementado)
+      responses:
+        '200': { description: Chave Base32 e URI retornadas }
+
+  /v1/operator/mfa/enable:
+    post:
+      summary: Valida primeiro código TOTP e ativa o MFA permanentemente para o operador (implementado)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [secret, code]
+              properties:
+                secret: { type: string }
+                code: { type: string }
+      responses:
+        '200': { description: MFA ativado com sucesso }
+        '400': { description: Código TOTP inválido }
+
+  /v1/operator/mfa/disable:
+    post:
+      summary: Desativa o MFA mediante confirmação com senha atual (implementado)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password]
+              properties:
+                password: { type: string }
+      responses:
+        '200': { description: MFA desativado }
+        '401': { description: Senha incorreta }
+
+  /v1/operator/purge-expired:
+    post:
+      summary: Expurgar sessões e convites antigos com mais de N dias para conformidade LGPD (implementado - ADMIN)
+      parameters: [{ name: days, in: query, schema: { type: integer, default: 7 } }]
+      responses:
+        '200': { description: Contagem de registros expurgados }
+
   /v1/operator/audit:
     get:
       summary: Trilha de auditoria das ações administrativas da unidade (implementado)

@@ -12,34 +12,16 @@ import {
 import type { Request, Response } from 'express';
 import { createHash, randomBytes } from 'node:crypto';
 import { PrismaService } from './prisma.service.js';
+import { SlidingWindowRateLimiter } from './common/rate-limiter.js';
 
 function sha256(value: string): string {
   return createHash('sha256').update(value).digest('hex');
 }
 
-// Simple in-memory sliding window rate limiter
-interface RateLimitRecord {
-  count: number;
-  resetAt: number;
-}
-const ipRateLimits = new Map<string, RateLimitRecord>();
-
-function checkRateLimit(ip: string, maxRequests = 10, windowMs = 60000): boolean {
-  const now = Date.now();
-  const record = ipRateLimits.get(ip);
-  if (!record || now > record.resetAt) {
-    ipRateLimits.set(ip, { count: 1, resetAt: now + windowMs });
-    return true;
-  }
-  if (record.count >= maxRequests) {
-    return false;
-  }
-  record.count += 1;
-  return true;
-}
-
 @Controller('v1/viewer')
 export class ViewerController {
+  private readonly redeemLimiter = new SlidingWindowRateLimiter(10, 60 * 1000);
+
   constructor(private readonly prisma: PrismaService) {}
 
   @Get('session')
@@ -78,9 +60,10 @@ export class ViewerController {
     @Res({ passthrough: true }) res: Response,
   ) {
     const clientIp = (req.ip || req.header('x-forwarded-for') || '127.0.0.1').split(',')[0].trim();
-    if (!checkRateLimit(clientIp, 10, 60000)) {
+    const rateCheck = this.redeemLimiter.check(clientIp);
+    if (!rateCheck.allowed) {
       throw new HttpException(
-        'Muitas tentativas de validação. Aguarde 1 minuto.',
+        `Muitas tentativas de validação. Aguarde ${rateCheck.retryAfterSeconds} segundos.`,
         HttpStatus.TOO_MANY_REQUESTS,
       );
     }

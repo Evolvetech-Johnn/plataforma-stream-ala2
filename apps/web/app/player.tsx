@@ -15,9 +15,15 @@ export default function Player() {
   const [broadcast, setBroadcast] = useState<CurrentBroadcast>({ status: 'NONE' });
   const [message, setMessage] = useState('Insira o código de convite privado para acessar.');
   const [loading, setLoading] = useState(false);
+  const [buffering, setBuffering] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
   const [playing, setPlaying] = useState(false);
+
+  const authHeaders = {
+    'Content-Type': 'application/json',
+    'X-Requested-With': 'XMLHttpRequest',
+  };
 
   async function checkSession() {
     try {
@@ -75,6 +81,7 @@ export default function Player() {
         hlsRef.current = null;
       }
       setPlaying(false);
+      setBuffering(false);
     }
   }, [broadcast.status]);
 
@@ -86,7 +93,7 @@ export default function Player() {
       const response = await fetch('/api/v1/viewer/redeem', {
         method: 'POST',
         credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders,
         body: JSON.stringify({ token: token.trim() }),
       });
 
@@ -108,12 +115,13 @@ export default function Player() {
 
   async function logout() {
     try {
-      await fetch('/api/v1/viewer/logout', { method: 'POST' });
+      await fetch('/api/v1/viewer/logout', { method: 'POST', headers: authHeaders });
     } catch {
       // ignora
     }
     setAuthorized(false);
     setPlaying(false);
+    setBuffering(false);
     if (hlsRef.current) {
       hlsRef.current.destroy();
       hlsRef.current = null;
@@ -131,6 +139,21 @@ export default function Player() {
       hlsRef.current = null;
     }
 
+    // Configura eventos nativos de buffer e stalls
+    video.onwaiting = () => {
+      setBuffering(true);
+      setMessage('Ajustando buffer de vídeo...');
+    };
+    video.onplaying = () => {
+      setBuffering(false);
+      setPlaying(true);
+      setMessage('Reproduzindo áudio e vídeo ao vivo.');
+    };
+    video.onstalled = () => {
+      setBuffering(true);
+      setMessage('Conexão instável. Aguardando novos fragmentos...');
+    };
+
     if (video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = src;
     } else if (Hls.isSupported()) {
@@ -138,6 +161,30 @@ export default function Player() {
         enableWorker: true,
         lowLatencyMode: false,
       });
+
+      hls.on(Hls.Events.ERROR, (_, data) => {
+        if (data.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR) {
+          setBuffering(true);
+          setMessage('Conexão oscilando. Reconectando buffer...');
+        } else if (data.fatal) {
+          setBuffering(true);
+          switch (data.type) {
+            case Hls.ErrorTypes.NETWORK_ERROR:
+              setMessage('Tentando restabelecer conexão com o servidor...');
+              hls.startLoad();
+              break;
+            case Hls.ErrorTypes.MEDIA_ERROR:
+              setMessage('Recuperando decodificação de mídia...');
+              hls.recoverMediaError();
+              break;
+            default:
+              setMessage('Erro na reprodução. Tentando reiniciar player...');
+              hls.destroy();
+              break;
+          }
+        }
+      });
+
       hlsRef.current = hls;
       hls.loadSource(src);
       hls.attachMedia(video);
@@ -208,13 +255,35 @@ export default function Player() {
         </form>
       )}
 
-      <video
-        ref={videoRef}
-        controls
-        playsInline
-        preload="none"
-        aria-label="Transmissão ao vivo da reunião"
-      />
+      <div style={{ position: 'relative' }}>
+        <video
+          ref={videoRef}
+          controls
+          playsInline
+          preload="none"
+          aria-label="Transmissão ao vivo da reunião"
+        />
+        {buffering && (
+          <div
+            style={{
+              position: 'absolute',
+              top: '50%',
+              left: '50%',
+              transform: 'translate(-50%, -50%)',
+              background: 'rgba(15, 23, 42, 0.85)',
+              color: 'white',
+              padding: '8px 16px',
+              borderRadius: '20px',
+              fontSize: '13px',
+              fontWeight: 600,
+              pointerEvents: 'none',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+            }}
+          >
+            ⏳ Conexão lenta / Ajustando sinal...
+          </div>
+        )}
+      </div>
 
       {authorized && broadcast.status === 'LIVE' && !playing && (
         <div style={{ textAlign: 'center', margin: '14px 0' }}>

@@ -11,24 +11,27 @@ import {
   HttpCode,
   HttpStatus,
   Query,
+  HttpException,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
-import {
-  OperatorService,
-} from './operator.service.js';
-import {
-  OperatorGuard,
-  Roles,
-} from './operator.guard.js';
+import { OperatorService } from './operator.service.js';
+import { OperatorGuard, Roles } from './operator.guard.js';
+import { CsrfGuard } from '../common/csrf.guard.js';
+import { SlidingWindowRateLimiter } from '../common/rate-limiter.js';
 import {
   LoginDto,
   MfaVerifyDto,
+  MfaEnableDto,
+  MfaDisableDto,
   CreateBroadcastDto,
   CreateInviteDto,
 } from './operator.dto.js';
 
 @Controller('v1/operator')
 export class OperatorController {
+  // Limita tentativas de login do operador: 5 requisições por IP a cada 5 minutos
+  private readonly loginLimiter = new SlidingWindowRateLimiter(5, 5 * 60 * 1000);
+
   constructor(private readonly operatorService: OperatorService) {}
 
   @Post('login')
@@ -38,19 +41,32 @@ export class OperatorController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const ip = req.ip || req.header('x-forwarded-for') || undefined;
+    const rawIp = req.ip || req.header('x-forwarded-for') || '127.0.0.1';
+    const clientIp = String(rawIp).split(',')[0].trim();
+
+    const rateCheck = this.loginLimiter.check(clientIp);
+    if (!rateCheck.allowed) {
+      throw new HttpException(
+        `Muitas tentativas de login. Aguarde ${rateCheck.retryAfterSeconds} segundos.`,
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+
     const userAgent = req.header('user-agent') || undefined;
 
     const result = await this.operatorService.login(
       body.email,
       body.password,
-      ip,
+      clientIp,
       userAgent,
     );
 
     if (result.mfaRequired) {
       return { mfaRequired: true, tempToken: result.tempToken };
     }
+
+    // Reset rate limiter on successful login
+    this.loginLimiter.reset(clientIp);
 
     res.cookie('op_session', result.session.sessionSecret, {
       httpOnly: true,
@@ -73,15 +89,18 @@ export class OperatorController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const ip = req.ip || req.header('x-forwarded-for') || undefined;
+    const rawIp = req.ip || req.header('x-forwarded-for') || '127.0.0.1';
+    const clientIp = String(rawIp).split(',')[0].trim();
     const userAgent = req.header('user-agent') || undefined;
 
     const session = await this.operatorService.verifyMfa(
       body.email,
       body.code,
-      ip,
+      clientIp,
       userAgent,
     );
+
+    this.loginLimiter.reset(clientIp);
 
     res.cookie('op_session', session.sessionSecret, {
       httpOnly: true,
@@ -96,8 +115,36 @@ export class OperatorController {
     };
   }
 
+  @Post('mfa/setup')
+  @UseGuards(OperatorGuard, CsrfGuard)
+  @HttpCode(HttpStatus.OK)
+  async setupMfa(@Req() req: Request) {
+    return this.operatorService.setupMfa(req.operatorUser!.id);
+  }
+
+  @Post('mfa/enable')
+  @UseGuards(OperatorGuard, CsrfGuard)
+  @HttpCode(HttpStatus.OK)
+  async enableMfa(@Body() body: MfaEnableDto, @Req() req: Request) {
+    return this.operatorService.enableMfa(
+      req.operatorUser!.id,
+      body.secret,
+      body.code,
+    );
+  }
+
+  @Post('mfa/disable')
+  @UseGuards(OperatorGuard, CsrfGuard)
+  @HttpCode(HttpStatus.OK)
+  async disableMfa(@Body() body: MfaDisableDto, @Req() req: Request) {
+    return this.operatorService.disableMfa(
+      req.operatorUser!.id,
+      body.password,
+    );
+  }
+
   @Post('logout')
-  @UseGuards(OperatorGuard)
+  @UseGuards(OperatorGuard, CsrfGuard)
   @HttpCode(HttpStatus.OK)
   async logout(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
     if (req.operatorUser) {
@@ -131,7 +178,7 @@ export class OperatorController {
   }
 
   @Post('broadcasts')
-  @UseGuards(OperatorGuard)
+  @UseGuards(OperatorGuard, CsrfGuard)
   @Roles('ADMIN', 'OPERATOR')
   async createBroadcast(
     @Body() body: CreateBroadcastDto,
@@ -153,7 +200,7 @@ export class OperatorController {
   }
 
   @Post('broadcasts/:id/start')
-  @UseGuards(OperatorGuard)
+  @UseGuards(OperatorGuard, CsrfGuard)
   @Roles('ADMIN', 'OPERATOR')
   async startBroadcast(@Param('id') id: string, @Req() req: Request) {
     const unitId = req.operatorUser!.memberships[0]?.unitId;
@@ -165,7 +212,7 @@ export class OperatorController {
   }
 
   @Post('broadcasts/:id/pause')
-  @UseGuards(OperatorGuard)
+  @UseGuards(OperatorGuard, CsrfGuard)
   @Roles('ADMIN', 'OPERATOR')
   async pauseBroadcast(@Param('id') id: string, @Req() req: Request) {
     const unitId = req.operatorUser!.memberships[0]?.unitId;
@@ -177,7 +224,7 @@ export class OperatorController {
   }
 
   @Post('broadcasts/:id/resume')
-  @UseGuards(OperatorGuard)
+  @UseGuards(OperatorGuard, CsrfGuard)
   @Roles('ADMIN', 'OPERATOR')
   async resumeBroadcast(@Param('id') id: string, @Req() req: Request) {
     const unitId = req.operatorUser!.memberships[0]?.unitId;
@@ -189,7 +236,7 @@ export class OperatorController {
   }
 
   @Post('broadcasts/:id/end')
-  @UseGuards(OperatorGuard)
+  @UseGuards(OperatorGuard, CsrfGuard)
   @Roles('ADMIN', 'OPERATOR')
   async endBroadcast(@Param('id') id: string, @Req() req: Request) {
     const unitId = req.operatorUser!.memberships[0]?.unitId;
@@ -197,7 +244,7 @@ export class OperatorController {
   }
 
   @Post('broadcasts/:id/invites')
-  @UseGuards(OperatorGuard)
+  @UseGuards(OperatorGuard, CsrfGuard)
   @Roles('ADMIN', 'OPERATOR')
   async createInvite(
     @Param('id') id: string,
@@ -221,7 +268,7 @@ export class OperatorController {
   }
 
   @Delete('invites/:id')
-  @UseGuards(OperatorGuard)
+  @UseGuards(OperatorGuard, CsrfGuard)
   @Roles('ADMIN', 'OPERATOR')
   async revokeInvite(@Param('id') id: string, @Req() req: Request) {
     const unitId = req.operatorUser!.memberships[0]?.unitId;
@@ -246,5 +293,12 @@ export class OperatorController {
       limit ? parseInt(limit, 10) : 50,
     );
   }
-}
 
+  @Post('purge-expired')
+  @UseGuards(OperatorGuard, CsrfGuard)
+  @Roles('ADMIN')
+  async purgeExpired(@Req() req: Request, @Query('days') days?: string) {
+    const daysToKeep = days ? parseInt(days, 10) : 7;
+    return this.operatorService.purgeExpiredData(req.operatorUser!.id, daysToKeep);
+  }
+}

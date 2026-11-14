@@ -4,6 +4,8 @@ import * as argon2 from 'argon2';
 import { authenticator } from 'otplib';
 import { OperatorService } from '../src/operator/operator.service.js';
 import { ViewerController } from '../src/viewer.controller.js';
+import { CsrfGuard } from '../src/common/csrf.guard.js';
+import { SlidingWindowRateLimiter } from '../src/common/rate-limiter.js';
 
 describe('Testes Mandatórios 1, 2, 6, 7 e 8: Operador, RBAC, Estados e Viewer', () => {
   const dummyUnitId = 'unit-123';
@@ -46,8 +48,12 @@ describe('Testes Mandatórios 1, 2, 6, 7 e 8: Operador, RBAC, Estados e Viewer',
     return {
       user: {
         findUnique: async ({ where }: any) => {
-          if (where.email === user.email) return user;
+          if (where.email === user.email || where.id === user.id) return user;
           return null;
+        },
+        update: async ({ where, data }: any) => {
+          if (where.id === user.id) Object.assign(user, data);
+          return user;
         },
       },
       operatorSession: {
@@ -141,6 +147,7 @@ describe('Testes Mandatórios 1, 2, 6, 7 e 8: Operador, RBAC, Estados e Viewer',
               sessions.forEach((s) => Object.assign(s, data));
               return { count: sessions.length };
             },
+            deleteMany: async () => ({ count: 2 }),
           },
           viewerInvite: {
             findFirst: async ({ where }: any) => invites.find((i) => i.id === where.id) || null,
@@ -152,6 +159,10 @@ describe('Testes Mandatórios 1, 2, 6, 7 e 8: Operador, RBAC, Estados e Viewer',
               }
               return i;
             },
+            deleteMany: async () => ({ count: 1 }),
+          },
+          operatorSession: {
+            deleteMany: async () => ({ count: 3 }),
           },
           auditEvent: {
             create: async ({ data }: any) => {
@@ -278,5 +289,85 @@ describe('Testes Mandatórios 1, 2, 6, 7 e 8: Operador, RBAC, Estados e Viewer',
     const result = await controller.logout(req, res);
     assert.deepEqual(result, { success: true });
     assert.equal(clearedCookie, true);
+  });
+
+  test('CSRF Guard: Bloqueia requisições POST mutativas sem cabeçalho anti-CSRF', () => {
+    const guard = new CsrfGuard();
+
+    // 1. GET seguro passa direto
+    const getContext = {
+      switchToHttp: () => ({
+        getRequest: () => ({ method: 'GET', header: () => undefined }),
+      }),
+    } as any;
+    assert.equal(guard.canActivate(getContext), true);
+
+    // 2. POST sem header customizado é barrado com 403
+    const unsafePostContext = {
+      switchToHttp: () => ({
+        getRequest: () => ({ method: 'POST', header: () => undefined }),
+      }),
+    } as any;
+    assert.throws(
+      () => guard.canActivate(unsafePostContext),
+      /Requisição bloqueada por política anti-CSRF/,
+    );
+
+    // 3. POST com X-Requested-With é liberado
+    const safePostContext = {
+      switchToHttp: () => ({
+        getRequest: () => ({
+          method: 'POST',
+          header: (name: string) => (name.toLowerCase() === 'x-requested-with' ? 'XMLHttpRequest' : undefined),
+        }),
+      }),
+    } as any;
+    assert.equal(guard.canActivate(safePostContext), true);
+  });
+
+  test('Rate Limiting: Exceder limite de 5 tentativas bloqueia requisição subsequente', () => {
+    const limiter = new SlidingWindowRateLimiter(5, 60000);
+    const ip = '192.168.1.100';
+
+    for (let i = 0; i < 5; i++) {
+      const res = limiter.check(ip);
+      assert.equal(res.allowed, true);
+    }
+
+    // 6ª tentativa deve ser bloqueada
+    const blockedRes = limiter.check(ip);
+    assert.equal(blockedRes.allowed, false);
+    assert.ok(blockedRes.retryAfterSeconds > 0);
+  });
+
+  test('MFA Setup e Enable: Geração de chave Base32 e ativação com validação de token', async () => {
+    const prisma = await createMockPrisma();
+    const service = new OperatorService(prisma);
+
+    // Setup gera secret e url
+    const setup = await service.setupMfa(dummyUserId);
+    assert.ok(setup.secret);
+    assert.ok(setup.otpauthUrl.startsWith('otpauth://totp/'));
+
+    // Código inválido falha
+    await assert.rejects(
+      async () => service.enableMfa(dummyUserId, setup.secret, '000000'),
+      /Código de verificação TOTP inválido/,
+    );
+
+    // Código correto ativa MFA
+    const validToken = authenticator.generate(setup.secret);
+    const enabled = await service.enableMfa(dummyUserId, setup.secret, validToken);
+    assert.equal(enabled.success, true);
+  });
+
+  test('Purge LGPD: Limpeza de dados com mais de 7 dias', async () => {
+    const prisma = await createMockPrisma();
+    const service = new OperatorService(prisma);
+
+    const result = await service.purgeExpiredData(dummyUserId, 7);
+    assert.equal(result.deletedViewerSessions, 2);
+    assert.equal(result.deletedInvites, 1);
+    assert.equal(result.deletedOperatorSessions, 3);
   });
 });
